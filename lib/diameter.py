@@ -2713,10 +2713,7 @@ class Diameter:
 
                 # Update Subscriber location information
                 try:
-                    default_eps_bearer_qos = self.get_avp_data(avps, 1049)[0]
-                    self.logTool.log(service='HSS', level='debug', message=f"[diameter.py] [Answer_16777238_272] [CCA] default_eps_bearer_qos: {default_eps_bearer_qos}", redisClient=self.redisMessaging)
-
-                    default_eps_bearer_3gpp_user_location_info = self.decode_3gpp_user_location_info(self.get_avp_data(default_eps_bearer_qos, 22)[0])
+                    default_eps_bearer_3gpp_user_location_info = self.decode_3gpp_user_location_info(self.get_avp_data(avps, 22)[0])
                     self.logTool.log(service='HSS', level='debug', message=f"[diameter.py] [Answer_16777238_272] [CCA] default_eps_bearer_3gpp_user_location_info: {default_eps_bearer_3gpp_user_location_info}", redisClient=self.redisMessaging)
 
                     last_seen_eci = default_eps_bearer_3gpp_user_location_info.get('ecgi', {}).get('eci', None)
