@@ -443,8 +443,7 @@ class Database:
                 name = result[1].lstrip()
                 model = result[2].lstrip()
                 count += 1
-
-            tacList['tacList'].append({str(tacPrefix): {'name': name, 'model': model}})
+                tacList['tacList'].append({str(tacPrefix): {'name': name, 'model': model}})
             self.redisMessaging.setValue(key="tacDatabase", value=json.dumps(tacList), usePrefix=True, prefixHostname=self.hostname, prefixServiceName='database')
             self.tacData = tacList
             self.logTool.log(service='Database', level='info', message=f"Loaded {count} IMEI TAC entries into Redis", redisClient=self.redisMessaging)
