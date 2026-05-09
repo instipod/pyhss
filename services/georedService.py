@@ -34,6 +34,8 @@ class GeoredService:
         
         self.georedPeers = config.get('geored', {}).get('endpoints', [])
         self.webhookPeers = config.get('webhooks', {}).get('endpoints', [])
+        self.eventWebhookPeers = config.get('event_webhooks', {}).get('endpoints', [])
+        self.eventWebhooksEnabled = config.get('event_webhooks', {}).get('enabled', False)
         self.ocsPeers = config.get('ocs', {}).get('endpoints', [])
         self.ocsNotificationsEnabled = config.get('ocs', {}).get('enabled', False)
         self.benchmarking = config.get('hss').get('enable_benchmarking', False)
@@ -359,22 +361,34 @@ class GeoredService:
 
                 webhookType = 'other'
 
+                # Check for OCS notification type
                 notificationType = webhookMessage.get('notification_type', None)
                 if notificationType:
                     if 'ocs' in notificationType.lower():
                         webhookType = 'ocs'
 
+                # Check for event-specific webhooks (attach_request and credit_control_request)
+                webhookBody = webhookMessage['body']
+                eventType = webhookBody.get('event_type', None)
+                if eventType and eventType in ['attach_request', 'credit_control_request']:
+                    webhookType = 'event'
+
                 webhookHeaders = webhookMessage['headers']
                 webhookOperation = webhookMessage['operation']
-                webhookBody = webhookMessage['body']
                 webhookTasks = []
-                
+
                 socketSession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
                 async with socketSession as session:
                     if webhookType == 'ocs':
                         if self.ocsNotificationsEnabled:
                             for remotePeer in self.ocsPeers:
                                 await(self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [handleWebhookQueue] Sending OCS Notification to: {remotePeer}"))
+                                webhookTasks.append(self.sendWebhook(asyncSession=session, url=remotePeer, operation=webhookOperation, body=webhookBody, headers=webhookHeaders))
+                            await asyncio.gather(*webhookTasks)
+                    elif webhookType == 'event':
+                        if self.eventWebhooksEnabled:
+                            for remotePeer in self.eventWebhookPeers:
+                                await(self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [handleWebhookQueue] Sending Event Webhook to: {remotePeer}"))
                                 webhookTasks.append(self.sendWebhook(asyncSession=session, url=remotePeer, operation=webhookOperation, body=webhookBody, headers=webhookHeaders))
                             await asyncio.gather(*webhookTasks)
                     else:
@@ -400,13 +414,14 @@ class GeoredService:
 
             georedEnabled = config.get('geored', {}).get('enabled', False)
             webhooksEnabled = config.get('webhooks', {}).get('enabled', False)
+            eventWebhooksEnabled = config.get('event_webhooks', {}).get('enabled', False)
 
             if self.georedPeers is not None:
                 if not len(self.georedPeers) > 0:
                     georedEnabled = False
 
-            if not georedEnabled and not webhooksEnabled:
-                await(self.logTool.logAsync(service='Geored', level='info', message=f"[Geored] [startService] Geored and Webhook services both disabled or missing peers, exiting."))
+            if not georedEnabled and not webhooksEnabled and not eventWebhooksEnabled:
+                await(self.logTool.logAsync(service='Geored', level='info', message=f"[Geored] [startService] Geored, Webhook, and Event Webhook services all disabled or missing peers, exiting."))
                 sys.exit()
 
             activeTasks = []
@@ -416,8 +431,8 @@ class GeoredService:
                 asymmetricGeoredTask = asyncio.create_task(self.handleAsymmetricGeoredQueue())
                 activeTasks.append(georedTask)
                 activeTasks.append(asymmetricGeoredTask)
-            
-            if webhooksEnabled:
+
+            if webhooksEnabled or eventWebhooksEnabled:
                 webhookTask = asyncio.create_task(self.handleWebhookQueue())
                 activeTasks.append(webhookTask)
 

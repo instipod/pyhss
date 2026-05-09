@@ -152,6 +152,12 @@ webhooks:
   endpoints:
     - 'http://127.0.0.1:8181'
 
+### Event-specific Webhooks (Attach Requests and Credit Control Requests)
+event_webhooks:
+  enabled: False
+  endpoints:
+    - 'http://127.0.0.1:9191'
+
 ### Notifications to OCS on Credit Control Requests
 ocs:
   enabled: False
