@@ -1857,12 +1857,28 @@ class Diameter:
             if subscriber_details['enabled'] == 0:
                 self.logTool.log(service='HSS', level='debug', message=f"Subscriber {imsi} is disabled", redisClient=self.redisMessaging)
 
+                # Send webhook for failed attach request
+                try:
+                    import datetime
+                    attachWebhookData = {
+                        'event_type': 'attach_request',
+                        'imsi': str(imsi),
+                        'subscriber_id': subscriber_details.get('subscriber_id', None),
+                        'timestamp': datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+                        'result': 'failure',
+                        'failure_reason': 'subscriber_disabled',
+                        'diameter_result_code': 5001
+                    }
+                    self.database.handleWebhook(attachWebhookData, 'PATCH')
+                except Exception as e:
+                    self.logTool.log(service='HSS', level='debug', message=f"Failed to send attach webhook: {str(e)}", redisClient=self.redisMessaging)
+
                 #Experimental Result AVP(Response Code for Failure)
                 avp_experimental_result = ''
                 avp_experimental_result += self.generate_vendor_avp(266, 40, 10415, '')                         #AVP Vendor ID
                 avp_experimental_result += self.generate_avp(298, 40, self.int_to_hex(5001, 4))                 #AVP Experimental-Result-Code: DIAMETER_ERROR_USER_UNKNOWN (5001)
                 avp += self.generate_avp(297, 40, avp_experimental_result)                                      #AVP Experimental-Result(297)
-                
+
                 avp += self.generate_avp(277, 40, "00000001")                                                   #Auth-Session-State
                 self.logTool.log(service='HSS', level='debug', message=f"Successfully Generated ULA for disabled Subscriber: {imsi}", redisClient=self.redisMessaging)
                 response = self.generate_diameter_packet("01", "40", 316, 16777251, packet_vars['hop-by-hop-identifier'], packet_vars['end-to-end-identifier'], avp)
@@ -1872,6 +1888,22 @@ class Diameter:
             if not rat_type_checker.is_rat_allowed(subscriber_details["attributes"], RAT.EUTRAN):
                 self.logTool.log(service='HSS', level='debug', message=f"Subscriber {imsi} is not allowed on EUTRAN RAT",
                                  redisClient=self.redisMessaging)
+
+                # Send webhook for failed attach request
+                try:
+                    import datetime
+                    attachWebhookData = {
+                        'event_type': 'attach_request',
+                        'imsi': str(imsi),
+                        'subscriber_id': subscriber_details.get('subscriber_id', None),
+                        'timestamp': datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+                        'result': 'failure',
+                        'failure_reason': 'rat_not_allowed',
+                        'diameter_result_code': 5421
+                    }
+                    self.database.handleWebhook(attachWebhookData, 'PATCH')
+                except Exception as e:
+                    self.logTool.log(service='HSS', level='debug', message=f"Failed to send attach webhook: {str(e)}", redisClient=self.redisMessaging)
 
                 # Experimental Result AVP(Response Code for Failure)
                 avp_experimental_result = ''
@@ -1892,6 +1924,22 @@ class Diameter:
             self.logTool.log(service='HSS', level='debug', message="failed to get data backfrom database for imsi " + str(imsi), redisClient=self.redisMessaging)
             self.logTool.log(service='HSS', level='debug', message="Error is " + str(e), redisClient=self.redisMessaging)
             self.logTool.log(service='HSS', level='debug', message="Responding with DIAMETER_ERROR_USER_UNKNOWN", redisClient=self.redisMessaging)
+
+            # Send webhook for failed attach request
+            try:
+                import datetime
+                attachWebhookData = {
+                    'event_type': 'attach_request',
+                    'imsi': str(imsi),
+                    'timestamp': datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+                    'result': 'failure',
+                    'failure_reason': 'user_unknown',
+                    'diameter_result_code': 5030
+                }
+                self.database.handleWebhook(attachWebhookData, 'PATCH')
+            except Exception as e:
+                self.logTool.log(service='HSS', level='debug', message=f"Failed to send attach webhook: {str(e)}", redisClient=self.redisMessaging)
+
             avp += self.generate_avp(268, 40, self.int_to_hex(5030, 4))
             response = self.generate_diameter_packet("01", "40", 316, 16777251, packet_vars['hop-by-hop-identifier'], packet_vars['end-to-end-identifier'], avp)     #Generate Diameter packet
             self.logTool.log(service='HSS', level='debug', message="Diameter user unknown - Sending ULA with DIAMETER_ERROR_USER_UNKNOWN", redisClient=self.redisMessaging)
@@ -1916,6 +1964,25 @@ class Diameter:
                 subscriberRoamingAllowed = self.validateSubscriberRoaming(subscriber=subscriber_details, mcc=mcc, mnc=mnc)
 
             if not subscriberRoamingAllowed and subscriberIsRoaming:
+                # Send webhook for failed attach request
+                try:
+                    import datetime
+                    attachWebhookData = {
+                        'event_type': 'attach_request',
+                        'imsi': str(imsi),
+                        'visited_plmn_mcc': str(mcc),
+                        'visited_plmn_mnc': str(mnc),
+                        'is_roaming': True,
+                        'subscriber_id': subscriber_details.get('subscriber_id', None),
+                        'timestamp': datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+                        'result': 'failure',
+                        'failure_reason': 'roaming_not_allowed',
+                        'diameter_result_code': 5004
+                    }
+                    self.database.handleWebhook(attachWebhookData, 'PATCH')
+                except Exception as e:
+                    self.logTool.log(service='HSS', level='debug', message=f"Failed to send attach webhook: {str(e)}", redisClient=self.redisMessaging)
+
                 avp = ''
                 session_id = self.get_avp_data(avps, 263)[0]                                                     #Get Session-ID
                 avp += self.generate_avp(263, 40, session_id)                                                    #Session-ID AVP set
@@ -1927,12 +1994,12 @@ class Diameter:
                 avp_experimental_result += self.generate_vendor_avp(266, 40, 10415, '')                         #AVP Vendor ID
                 avp_experimental_result += self.generate_avp(298, 40, self.int_to_hex(5004, 4))                 #AVP Experimental-Result-Code: DIAMETER_ERROR_ROAMING_NOT_ALLOWED (5004)
                 avp += self.generate_avp(297, 40, avp_experimental_result)                                      #AVP Experimental-Result(297)
-                
+
                 avp += self.generate_avp(277, 40, "00000001")                                                    #Auth-Session-State
                 avp += self.generate_avp(260, 40, "000001024000000c" + format(int(16777251),"x").zfill(8) +  "0000010a4000000c000028af")      #Vendor-Specific-Application-ID (S6a)
                 response = self.generate_diameter_packet("01", "40", 318, 16777251, packet_vars['hop-by-hop-identifier'], packet_vars['end-to-end-identifier'], avp)     #Generate Diameter packet
                 return response
-            
+
             self.logTool.log(service='HSS', level='debug', message=f"[diameter.py] [Answer_16777251_318] [AIA] Subscriber {imsi} passed roaming validation for {decodedPlmn}", redisClient=self.redisMessaging)
             
         except Exception as e:
@@ -1955,6 +2022,26 @@ class Diameter:
         self.logTool.log(service='HSS', level='debug', message="[diameter.py] [Answer_16777251_316] [ULA] Remote Peer is " + str(remote_peer), redisClient=self.redisMessaging)
 
         self.database.Update_Serving_MME(imsi=imsi, serving_mme=OriginHost, serving_mme_peer=remote_peer, serving_mme_realm=OriginRealm)
+
+        # Send webhook for attach request
+        try:
+            import datetime
+            attachWebhookData = {
+                'event_type': 'attach_request',
+                'imsi': str(imsi),
+                'serving_mme': str(OriginHost),
+                'serving_mme_realm': str(OriginRealm),
+                'serving_mme_peer': str(remote_peer),
+                'visited_plmn_mcc': str(mcc) if 'mcc' in locals() else None,
+                'visited_plmn_mnc': str(mnc) if 'mnc' in locals() else None,
+                'is_roaming': subscriberIsRoaming if 'subscriberIsRoaming' in locals() else None,
+                'subscriber_id': subscriber_details.get('subscriber_id', None),
+                'timestamp': datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+                'result': 'success'
+            }
+            self.database.handleWebhook(attachWebhookData, 'PATCH')
+        except Exception as e:
+            self.logTool.log(service='HSS', level='debug', message=f"Failed to send attach webhook: {str(e)}", redisClient=self.redisMessaging)
 
         #Boilerplate AVPs
         avp += self.generate_avp(268, 40, self.int_to_hex(2001, 4))                                      #Result Code (DIAMETER_SUCCESS (2001))
