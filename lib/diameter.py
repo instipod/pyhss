@@ -2765,64 +2765,124 @@ class Diameter:
             if int(CC_Request_Type) == 1:
                 self.logTool.log(service='HSS', level='debug', message="[diameter.py] [Answer_16777238_272] [CCA] Request type for CCA is 1 - Initial", redisClient=self.redisMessaging)
 
-                #Get UE IP            
+                #Get UE IP
                 try:
                     ue_ip = self.get_avp_data(avps, 8)[0]
                     ue_ip = str(self.hex_to_ip(ue_ip))
-                    # Fire a notification to the webhook queue, for the OCS.
-                    try:
-                        ocsNotificationBody = {
-                                'notification_type': 'ocs',
-                                'timestamp': time.time_ns(),
-                                'operation': 'POST',
-                                'headers': {'Content-Type': 'application/json'},
-                                'body': {
-                                'event': 'initiate',
-                                'subscriber': {
-                                'imsi': imsi,
-                                'ue_ip': ue_ip,
-                                'apn': apn,
-                                'pcrf_session_id': binascii.unhexlify(session_id).decode(),
-                                }
-                            }
-                        }
-                        self.redisMessaging.sendMessage(queue=f'webhook', message=json.dumps(ocsNotificationBody), queueExpiry=120, usePrefix=True, prefixHostname=self.hostname, prefixServiceName='webhook')
-                    except Exception as e:
-                        self.logTool.log(service='HSS', level='error', message=f"[diameter.py] [Answer_16777238_272] [CCA] Failed queueing OCS notification to redis: {traceback.format_exc()}", redisClient=self.redisMessaging)
                 except Exception as E:
                     self.logTool.log(service='HSS', level='error', message="[diameter.py] [Answer_16777238_272] [CCA] Failed to get UE IP", redisClient=self.redisMessaging)
                     self.logTool.log(service='HSS', level='error', message=E, redisClient=self.redisMessaging)
-                    ue_ip = 'Failed to Decode / Get UE IP'
+                    ue_ip = None
+
+                # Extract location information for webhook
+                location_tac = None
+                location_cell_id = None
+                location_mcc = None
+                location_mnc = None
+                location_eci = None
+                location_enodeb_id = None
+                try:
+                    location_info_decoded = self.decode_3gpp_user_location_info(self.get_avp_data(avps, 22)[0])
+                    location_eci = location_info_decoded.get('ecgi', {}).get('eci', None)
+                    location_enodeb_id = location_info_decoded.get('ecgi', {}).get('enodeb_id', None)
+                    location_cell_id = location_info_decoded.get('ecgi', {}).get('cell_id', None)
+                    location_tac = location_info_decoded.get('tai', {}).get('tac', None)
+                    location_mcc = location_info_decoded.get('tai', {}).get('mcc', None)
+                    location_mnc = location_info_decoded.get('tai', {}).get('mnc', None)
+                except Exception as e:
+                    pass
+
+                # Extract RAT Type
+                rat_type = None
+                try:
+                    rat_type_hex = self.get_avp_data(avps, 1032)[0]
+                    rat_type = int(rat_type_hex, 16)
+                except Exception as e:
+                    pass
+
+                # Extract Access Network Gateway Address
+                access_network_gateway_address = None
+                try:
+                    access_network_gateway_address_hex = self.get_avp_data(avps, 1050)[0]
+                    access_network_gateway_address = str(self.hex_to_ip(access_network_gateway_address_hex[4:]))
+                except Exception as e:
+                    pass
+
+                # Extract Access Network Charging Address
+                access_network_charging_address = None
+                try:
+                    access_network_charging_address_hex = self.get_avp_data(avps, 501)[0]
+                    access_network_charging_address = str(self.hex_to_ip(access_network_charging_address_hex[4:]))
+                except Exception as e:
+                    pass
+
+                # Send webhook for credit control request
+                try:
+                    import datetime
+                    ccrWebhookData = {
+                        'event_type': 'credit_control_request',
+                        'request_type': 'initial',
+                        'imsi': str(imsi),
+                        'ue_ip': str(ue_ip) if ue_ip else None,
+                        'apn': str(apn),
+                        'pcrf_session_id': str(binascii.unhexlify(session_id).decode()),
+                        'serving_pgw': str(OriginHost),
+                        'serving_pgw_realm': str(OriginRealm),
+                        'tac': str(location_tac) if location_tac else None,
+                        'cell_id': str(location_cell_id) if location_cell_id else None,
+                        'mcc': str(location_mcc) if location_mcc else None,
+                        'mnc': str(location_mnc) if location_mnc else None,
+                        'eci': str(location_eci) if location_eci else None,
+                        'enodeb_id': str(location_enodeb_id) if location_enodeb_id else None,
+                        'rat_type': rat_type,
+                        'access_network_gateway_address': access_network_gateway_address,
+                        'access_network_charging_address': access_network_charging_address,
+                        'timestamp': datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
+                    }
+                    self.database.handleWebhook(ccrWebhookData, 'PATCH')
+                except Exception as e:
+                    self.logTool.log(service='HSS', level='debug', message=f"Failed to send credit control webhook: {str(e)}", redisClient=self.redisMessaging)
+
+                # Fire a notification to the webhook queue, for the OCS.
+                try:
+                    ocsNotificationBody = {
+                            'notification_type': 'ocs',
+                            'timestamp': time.time_ns(),
+                            'operation': 'POST',
+                            'headers': {'Content-Type': 'application/json'},
+                            'body': {
+                            'event': 'initiate',
+                            'subscriber': {
+                            'imsi': imsi,
+                            'ue_ip': ue_ip,
+                            'apn': apn,
+                            'pcrf_session_id': binascii.unhexlify(session_id).decode(),
+                            }
+                        }
+                    }
+                    self.redisMessaging.sendMessage(queue=f'webhook', message=json.dumps(ocsNotificationBody), queueExpiry=120, usePrefix=True, prefixHostname=self.hostname, prefixServiceName='webhook')
+                except Exception as e:
+                    self.logTool.log(service='HSS', level='error', message=f"[diameter.py] [Answer_16777238_272] [CCA] Failed queueing OCS notification to redis: {traceback.format_exc()}", redisClient=self.redisMessaging)
 
                 #Store PGW location into Database
                 remote_peer = remote_peer + ";" + str(config['hss']['OriginHost'])
                 self.database.Update_Serving_APN(imsi=imsi, apn=apn, pcrf_session_id=binascii.unhexlify(session_id).decode(), serving_pgw=OriginHost, subscriber_routing=str(ue_ip), serving_pgw_realm=OriginRealm, serving_pgw_peer=remote_peer)
 
-                # Update Subscriber location information
-                try:
-                    default_eps_bearer_3gpp_user_location_info = self.decode_3gpp_user_location_info(self.get_avp_data(avps, 22)[0])
-                    self.logTool.log(service='HSS', level='debug', message=f"[diameter.py] [Answer_16777238_272] [CCA] default_eps_bearer_3gpp_user_location_info: {default_eps_bearer_3gpp_user_location_info}", redisClient=self.redisMessaging)
-
-                    last_seen_eci = default_eps_bearer_3gpp_user_location_info.get('ecgi', {}).get('eci', None)
-                    last_seen_enodeb_id = default_eps_bearer_3gpp_user_location_info.get('ecgi', {}).get('enodeb_id', None)
-                    last_seen_cell_id = default_eps_bearer_3gpp_user_location_info.get('ecgi', {}).get('cell_id', None)
-                    last_seen_tac = default_eps_bearer_3gpp_user_location_info.get('tai', {}).get('tac', None)
-                    last_seen_mcc = default_eps_bearer_3gpp_user_location_info.get('tai', {}).get('mcc', None)
-                    last_seen_mnc = default_eps_bearer_3gpp_user_location_info.get('tai', {}).get('mnc', None)
-                    last_location_update_timestamp = datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
-
-                    self.database.update_subscriber_location(imsi=imsi,
-                                                            last_seen_eci=last_seen_eci,
-                                                            last_seen_enodeb_id=last_seen_enodeb_id,
-                                                            last_seen_cell_id=last_seen_cell_id,
-                                                            last_seen_tac=last_seen_tac,
-                                                            last_seen_mcc=last_seen_mcc,
-                                                            last_seen_mnc=last_seen_mnc,
-                                                            last_location_update_timestamp=last_location_update_timestamp,
-                                                            propagate=True)
-
-                except Exception as e:
-                    pass
+                # Update Subscriber location information (reuse location variables extracted above)
+                if location_eci or location_tac:
+                    try:
+                        last_location_update_timestamp = datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
+                        self.database.update_subscriber_location(imsi=imsi,
+                                                                last_seen_eci=location_eci,
+                                                                last_seen_enodeb_id=location_enodeb_id,
+                                                                last_seen_cell_id=location_cell_id,
+                                                                last_seen_tac=location_tac,
+                                                                last_seen_mcc=location_mcc,
+                                                                last_seen_mnc=location_mnc,
+                                                                last_location_update_timestamp=last_location_update_timestamp,
+                                                                propagate=True)
+                    except Exception as e:
+                        pass
 
                 #Supported-Features(628) (Gx feature list)
                 avp += self.generate_vendor_avp(628, "80", 10415, "0000010a4000000c000028af0000027580000010000028af000000010000027680000010000028af0000000b")
@@ -2914,6 +2974,23 @@ class Diameter:
                     if serving_apn:
                         serving_apn_session_id = serving_apn.get('pcrf_session_id', "")
                         if serving_apn_session_id == session_id_string:
+                            # Send webhook for credit control termination request
+                            try:
+                                import datetime
+                                ccrTerminateWebhookData = {
+                                    'event_type': 'credit_control_request',
+                                    'request_type': 'terminate',
+                                    'imsi': str(imsi),
+                                    'apn': str(apn),
+                                    'pcrf_session_id': str(session_id_string),
+                                    'serving_pgw': str(OriginHost),
+                                    'serving_pgw_realm': str(OriginRealm),
+                                    'timestamp': datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
+                                }
+                                self.database.handleWebhook(ccrTerminateWebhookData, 'PATCH')
+                            except Exception as e:
+                                self.logTool.log(service='HSS', level='debug', message=f"Failed to send credit control termination webhook: {str(e)}", redisClient=self.redisMessaging)
+
                             try:
                                 ocsNotificationBody = {
                                         'notification_type': 'ocs',
