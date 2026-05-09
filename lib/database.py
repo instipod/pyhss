@@ -988,10 +988,20 @@ class Database:
 
     def handleWebhook(self, objectData, operation: str="PATCH"):
         webhooksEnabled = config.get('webhooks', {}).get('enabled', False)
+        eventWebhooksEnabled = config.get('event_webhooks', {}).get('enabled', False)
         endpointList = config.get('webhooks', {}).get('endpoints', [])
         webhook = {}
 
-        if not webhooksEnabled:
+        eventType = objectData.get('event_type', None)
+        if eventType and eventType in ['attach_request', 'credit_control_request']:
+            webhookType = 'event'
+        else:
+            webhookType = 'geored'
+
+        if not webhooksEnabled and webhookType is 'geored':
+            return False
+        
+        if not eventWebhooksEnabled and webhookType is 'event':
             return False
         
         if endpointList is None:
