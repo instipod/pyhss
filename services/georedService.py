@@ -31,7 +31,7 @@ class GeoredService:
         self.redisPort = config.get('redis', {}).get('port', 6379)
         self.redisGeoredMessaging = RedisMessagingAsync(host=self.redisHost, port=self.redisPort, useUnixSocket=self.redisUseUnixSocket, unixSocketPath=self.redisUnixSocketPath)
         self.redisWebhookMessaging = RedisMessagingAsync(host=self.redisHost, port=self.redisPort, useUnixSocket=self.redisUseUnixSocket, unixSocketPath=self.redisUnixSocketPath)
-        
+
         self.georedPeers = config.get('geored', {}).get('endpoints', [])
         self.webhookPeers = config.get('webhooks', {}).get('endpoints', [])
         self.eventWebhookPeers = config.get('event_webhooks', {}).get('endpoints', [])
@@ -40,6 +40,10 @@ class GeoredService:
         self.ocsNotificationsEnabled = config.get('ocs', {}).get('enabled', False)
         self.benchmarking = config.get('hss').get('enable_benchmarking', False)
         self.hostname = socket.gethostname()
+
+        # Debug logging for event webhooks configuration
+        self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [init] Event Webhooks are enabled: {self.eventWebhooksEnabled}")
+        self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [init] Event Webhooks are logging to: {self.eventWebhookPeers}")
 
     async def sendGeored(self, asyncSession, url: str, operation: str, body: str, transactionId: str=uuid.uuid4(), retryCount: int=3) -> bool:
             """
@@ -370,7 +374,7 @@ class GeoredService:
                 # Check for event-specific webhooks (attach_request and credit_control_request)
                 webhookBody = webhookMessage['body']
                 eventType = webhookBody.get('event_type', None)
-                if eventType and eventType in ['attach_request', 'credit_control_request']:
+                if self.eventWebhooksEnabled and eventType and eventType in ['attach_request', 'credit_control_request']:
                     webhookType = 'event'
 
                 webhookHeaders = webhookMessage['headers']
