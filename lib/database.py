@@ -998,10 +998,10 @@ class Database:
         else:
             webhookType = 'geored'
 
-        if not webhooksEnabled and webhookType is 'geored':
+        if not webhooksEnabled and webhookType == 'geored':
             return False
         
-        if not eventWebhooksEnabled and webhookType is 'event':
+        if not eventWebhooksEnabled and webhookType == 'event':
             return False
         
         if endpointList is None:
