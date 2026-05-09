@@ -41,10 +41,6 @@ class GeoredService:
         self.benchmarking = config.get('hss').get('enable_benchmarking', False)
         self.hostname = socket.gethostname()
 
-        # Debug logging for event webhooks configuration
-        self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [init] Event Webhooks are enabled: {self.eventWebhooksEnabled}")
-        self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [init] Event Webhooks are logging to: {self.eventWebhookPeers}")
-
     async def sendGeored(self, asyncSession, url: str, operation: str, body: str, transactionId: str=uuid.uuid4(), retryCount: int=3) -> bool:
             """
             Sends a Geored HTTP request to a given endpoint.
@@ -439,6 +435,13 @@ class GeoredService:
             if webhooksEnabled or eventWebhooksEnabled:
                 webhookTask = asyncio.create_task(self.handleWebhookQueue())
                 activeTasks.append(webhookTask)
+                if eventWebhooksEnabled:
+                    await(self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [startService] Event Webhooks are logging to: {self.eventWebhookPeers}"))
+
+            await(self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [startService] Webhooks are enabled: {webhooksEnabled}"))
+            await(self.logTool.logAsync(service='Geored', level='debug', message=f"[Geored] [startService] Event Webhooks are enabled: {self.eventWebhooksEnabled}"))
+
+            await(self.logTool.logAsync(service='Geored', level='info', message=f"[Geored] [startService] Starting task count: {len(activeTasks)}"))
 
             completeTasks, pendingTasks = await(asyncio.wait(activeTasks, return_when=asyncio.FIRST_COMPLETED))
 
